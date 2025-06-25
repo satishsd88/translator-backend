@@ -1,31 +1,43 @@
-const axios = require("axios");
 const fs = require("fs");
-const FormData = require("form-data");
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const axios = require("axios");
 
 async function transcribeAudio(filePath) {
-  try {
-    const form = new FormData();
-    form.append("file", fs.createReadStream(filePath));
-    form.append("model", "whisper-1");
-
-    const response = await axios.post(
-      "https://api.openai.com/v1/audio/transcriptions",
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: `Bearer ${OPENAI_API_KEY}`
-        }
+  const response = await axios.post(
+    "https://api.openai.com/v1/audio/transcriptions",
+    fs.createReadStream(filePath),
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "multipart/form-data"
+      },
+      params: {
+        model: "whisper-1"
       }
-    );
-
-    return response.data.text;
-  } catch (err) {
-    console.error("❌ Whisper API failed:", err.response?.data || err.message);
-    throw err;
-  }
+    }
+  );
+  return response.data.text;
 }
 
-module.exports = { transcribeAudio };
+async function translateText(text, targetLang = "Hindi") {
+  const prompt = `Translate the following English text to ${targetLang}: ${text}`;
+  const response = await axios.post(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      model: "gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+  return response.data.choices[0].message.content.trim();
+}
+
+module.exports = {
+  transcribeAudio,
+  translateText
+};
