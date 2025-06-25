@@ -1,0 +1,17 @@
+{
+  "name": "live-translator-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "express": "^4.18.2",
+    "form-data": "^4.0.0",
+    "fs": "^0.0.1-security",
+    "multer": "^1.4.5",
+    "openai": "^4.29.1",
+    "ws": "^8.13.0"
+  }
+}
