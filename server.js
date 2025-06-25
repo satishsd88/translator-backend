@@ -9,6 +9,7 @@ const { transcribeAudio } = require("./whisper");
 const { translateText } = require("./translate");
 
 const app = express();
+app.use(cors()); 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
