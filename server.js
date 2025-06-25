@@ -9,6 +9,8 @@ const { transcribeAudio } = require("./whisper");
 const { translateText } = require("./translate");
 
 const app = express();
+
+// Enable CORS for Chrome Extension and Web App
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST'],
@@ -20,7 +22,11 @@ const wss = new WebSocket.Server({ server });
 
 let latestClient = null;
 
-// WebSocket connection
+// WebSocket for frontend
 wss.on("connection", (ws) => {
-  console.log("✅ WebS
+  console.log("WebSocket client connected");
+  latestClient = ws;
+});
 
+// Multer setup for audio file upload
+const upload = multer({ dest: "uploads/" });
