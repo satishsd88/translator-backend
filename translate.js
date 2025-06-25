@@ -1,19 +1,18 @@
-const { Configuration, OpenAIApi } = require("openai");
+const OpenAI = require("openai");
 
-const configuration = new Configuration({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
-const openai = new OpenAIApi(configuration);
 
 async function translateText(text, targetLanguage = "Hindi") {
   const prompt = `Translate the following to ${targetLanguage}:\n\n"${text}"`;
 
-  const response = await openai.createChatCompletion({
+  const response = await openai.chat.completions.create({
     model: "gpt-4",
     messages: [{ role: "user", content: prompt }]
   });
 
-  return response.data.choices[0].message.content.trim();
+  return response.choices[0].message.content.trim();
 }
 
 module.exports = { translateText };
