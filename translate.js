@@ -1,19 +1,24 @@
-const OpenAI = require("openai");
+const axios = require("axios");
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+async function translateText(text, targetLang = "hi") {
+  const response = await axios.post(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: `Translate to ${targetLang}` },
+        { role: "user", content: text }
+      ]
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+      }
+    }
+  );
 
-async function translateText(text, targetLanguage = "Hindi") {
-  const prompt = `Translate the following to ${targetLanguage}:\n\n"${text}"`;
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-4",
-    messages: [{ role: "user", content: prompt }]
-  });
-
-  return response.choices[0].message.content.trim();
+  return response.data.choices[0].message.content;
 }
 
 module.exports = { translateText };
-
