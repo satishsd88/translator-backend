@@ -16,3 +16,4 @@ async function translateText(text, targetLanguage = "Hindi") {
 }
 
 module.exports = { translateText };
+
