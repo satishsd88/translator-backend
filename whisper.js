@@ -20,3 +20,7 @@ async function transcribeAudio(filePath) {
 
   return response.data.text;
 }
+
+module.exports = {
+  transcribeAudio
+};
