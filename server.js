@@ -10,8 +10,8 @@ const { translateText } = require("./translate");
 
 const app = express();
 
-// ✅ Apply CORS to allow Chrome Extension access
-app.options('*', cors()); // Enable preflight for all routes
+// ✅ CORS setup for Chrome Extension and web app access
+app.options('*', cors()); // Preflight support
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -23,32 +23,32 @@ const wss = new WebSocket.Server({ server });
 
 let latestClient = null;
 
-// ✅ WebSocket connection from frontend (for live translation display)
+// ✅ WebSocket for live translation push
 wss.on("connection", (ws) => {
-  console.log("WebSocket client connected");
+  console.log("🔌 WebSocket client connected");
   latestClient = ws;
 });
 
-// ✅ Multer config for audio file upload
+// ✅ Multer for audio uploads
 const upload = multer({ dest: "uploads/" });
 
-// ✅ POST /upload route (used by Chrome Extension)
+// ✅ POST /upload: receives audio, transcribes, translates, sends via WebSocket
 app.post("/upload", upload.single("audio"), async (req, res) => {
   const filePath = req.file?.path;
 
   if (!filePath) {
-    console.log("No audio file received.");
+    console.log("❌ No audio file received.");
     return res.status(400).json({ success: false, error: "No file uploaded" });
   }
 
-  console.log("Audio file received:", filePath);
+  console.log("✅ Audio file received:", filePath);
 
   try {
     const text = await transcribeAudio(filePath);
-    console.log("Transcript:", text);
+    console.log("📝 Transcript:", text);
 
     const translated = await translateText(text, "Hindi");
-    console.log("Translated:", translated);
+    console.log("🌍 Translated:", translated);
 
     if (latestClient) {
       latestClient.send(translated);
@@ -56,19 +56,24 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
 
     res.json({ success: true, transcript: text, translated });
   } catch (err) {
-    console.error("Upload failed:", err.response?.data || err.message);
-    res.status(500).json({ success: false, error: err.message });
+    const errData = err.response?.data || err.message || "Unknown error";
+    console.error("❌ Upload failed:", errData);
+    res.status(500).json({ success: false, error: errData });
   } finally {
-    fs.unlinkSync(filePath);
+    try {
+      fs.unlinkSync(filePath); // Clean temp file
+    } catch (cleanupError) {
+      console.warn("⚠️ Failed to delete temp file:", cleanupError.message);
+    }
   }
 });
 
-// ✅ GET / route (just a test route for Render health)
+// ✅ GET /: basic check route
 app.get("/", (req, res) => {
   res.send("Live Translator Backend is Running!");
 });
 
-// ✅ Start the server
+// ✅ Start server
 server.listen(process.env.PORT || 3000, () => {
-  console.log("Server running on port", process.env.PORT || 3000);
+  console.log("🚀 Server running on port", process.env.PORT || 3000);
 });
