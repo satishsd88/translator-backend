@@ -1,54 +1,46 @@
-const express = require("express");
-const http = require("http");
-const WebSocket = require("ws");
-const multer = require("multer");
 const fs = require("fs");
-const cors = require("cors");
+const ffmpeg = require("fluent-ffmpeg");
+const path = require("path");
 
-const { transcribeAudio } = require("./whisper");
-const { translateText } = require("./translate");
-
-const app = express();
-
-// ✅ CORS setup for Chrome Extension and web app access
-app.options('*', cors()); // Preflight support
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
-}));
-
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-
-let latestClient = null;
-
-// ✅ WebSocket for live translation push
-wss.on("connection", (ws) => {
-  console.log("🔌 WebSocket client connected");
-  latestClient = ws;
-});
-
-// ✅ Multer for audio uploads
-const upload = multer({ dest: "uploads/" });
-
-// ✅ POST /upload: receives audio, transcribes, translates, sends via WebSocket
 app.post("/upload", upload.single("audio"), async (req, res) => {
-  const filePath = req.file?.path;
+  const webmPath = req.file?.path;
+  const mp3Path = path.join("uploads", `${Date.now()}.mp3`);
 
-  if (!filePath) {
-    console.log("❌ No audio file received.");
-    return res.status(400).json({ success: false, error: "No file uploaded" });
+  if (!webmPath) {
+    return res.status(400).json({ success: false, error: "No audio file uploaded" });
   }
 
-  console.log("✅ Audio file received:", filePath);
+  console.log("🎧 Converting audio:", webmPath);
 
   try {
-    const text = await transcribeAudio(filePath);
-    console.log("📝 Transcript:", text);
+    // 🔧 Add explicit audio codec and bitrate
+    await new Promise((resolve, reject) => {
+      ffmpeg(webmPath)
+        .inputFormat('webm')
+        .audioCodec('libmp3lame')
+        .audioBitrate('128k')
+        .on('end', () => {
+          console.log("✅ Conversion complete:", mp3Path);
+          resolve();
+        })
+        .on('error', (err) => {
+          console.error("❌ FFmpeg conversion error:", err.message);
+          reject(err);
+        })
+        .save(mp3Path);
+    });
 
+    // 🔍 Log file size
+    const stats = fs.statSync(mp3Path);
+    console.log("📦 MP3 file size:", stats.size);
+
+    if (stats.size < 1024) {
+      throw new Error("Converted file too small or empty.");
+    }
+
+    // 🧠 Transcribe with Whisper
+    const text = await transcribeAudio(mp3Path);
     const translated = await translateText(text, "Hindi");
-    console.log("🌍 Translated:", translated);
 
     if (latestClient) {
       latestClient.send(translated);
@@ -56,24 +48,11 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
 
     res.json({ success: true, transcript: text, translated });
   } catch (err) {
-    const errData = err.response?.data || err.message || "Unknown error";
-    console.error("❌ Upload failed:", errData);
-    res.status(500).json({ success: false, error: errData });
+    console.error("❌ Whisper API failed:", err.response?.data || err.message);
+    res.status(500).json({ error: err.response?.data || err.message });
   } finally {
-    try {
-      fs.unlinkSync(filePath); // Clean temp file
-    } catch (cleanupError) {
-      console.warn("⚠️ Failed to delete temp file:", cleanupError.message);
-    }
+    // 🧹 Cleanup
+    try { fs.unlinkSync(webmPath); } catch {}
+    try { fs.unlinkSync(mp3Path); } catch {}
   }
-});
-
-// ✅ GET /: basic check route
-app.get("/", (req, res) => {
-  res.send("Live Translator Backend is Running!");
-});
-
-// ✅ Start server
-server.listen(process.env.PORT || 3000, () => {
-  console.log("🚀 Server running on port", process.env.PORT || 3000);
 });
