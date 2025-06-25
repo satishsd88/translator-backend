@@ -3,6 +3,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const multer = require("multer");
 const fs = require("fs");
+const cors = require("cors");
 
 const { transcribeAudio } = require("./whisper");
 const { translateText } = require("./translate");
