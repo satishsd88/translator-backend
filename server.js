@@ -10,23 +10,13 @@ const { translateText } = require("./translate");
 
 const app = express();
 
-// Enable CORS for Chrome Extension and Web App
+// ✅ Apply CORS before anything else
+app.options('*', cors()); // enable pre-flight for all routes
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
 }));
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-
-let latestClient = null;
-
-// WebSocket for frontend
-wss.on("connection", (ws) => {
-  console.log("WebSocket client connected");
-  latestClient = ws;
-});
-
-// Multer setup for audio file upload
-const upload = multer({ dest: "uploads/" });
