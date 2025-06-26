@@ -2,6 +2,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const FormData = require('form-data');
+const path = require('path'); // <<< ADD THIS LINE TO IMPORT PATH MODULE
 
 /**
  * Transcribes an audio file using OpenAI's Whisper API.
@@ -17,7 +18,9 @@ async function transcribe(audioFilePath, language) {
     }
 
     const form = new FormData();
-    form.append('file', fs.createReadStream(audioFilePath));
+    // Append the audio file as a readable stream, explicitly providing the filename
+    // This often helps OpenAI correctly infer the file format.
+    form.append('file', fs.createReadStream(audioFilePath), path.basename(audioFilePath)); // <<< UPDATED LINE
     form.append('model', 'whisper-1'); // Specify the Whisper model
     form.append('language', language);   // Pass the language selected by the user
     form.append('response_format', 'json'); // Request JSON output for easier parsing
