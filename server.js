@@ -13,7 +13,8 @@ const app = express();
 const upload = multer({
     dest: 'uploads/',
     fileFilter: (req, file, cb) => {
-        const allowedMimeTypes = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/mpga', 'audio/m4a'];
+        // Updated allowedMimeTypes to primarily support audio/wav
+        const allowedMimeTypes = ['audio/wav', 'audio/webm', 'audio/mpeg', 'audio/mp4', 'audio/mpga', 'audio/m4a'];
         if (allowedMimeTypes.includes(file.mimetype)) {
             cb(null, true);
         } else {
@@ -50,6 +51,20 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
         const inputPath = req.file.path;
         const targetLanguage = req.body.language || 'en';
 
+        // --- ADDED DIAGNOSTIC LOGGING ---
+        console.log(`Received file: ${req.file.originalname}`);
+        console.log(`Temporary file path on server: ${inputPath}`);
+        console.log(`Temporary file MIME type from Multer: ${req.file.mimetype}`);
+        try {
+            const stats = fs.statSync(inputPath);
+            console.log(`Temporary file size on server: ${stats.size} bytes`);
+            console.log(`Temporary file exists on server: ${fs.existsSync(inputPath)}`);
+        } catch (statError) {
+            console.error(`Error getting file stats on server: ${statError.message}`);
+        }
+        // --- END ADDED DIAGNOSTIC LOGGING ---
+
+
         // Transcribe using the OpenAI Whisper API via openaiTranscriptionService
         const transcription = await openaiTranscriptionService.transcribe(inputPath, targetLanguage);
 
@@ -59,6 +74,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
         // Clean up the temporary audio file after processing
         fs.unlink(inputPath, (err) => {
             if (err) console.error("Error deleting input file:", err);
+            else console.log(`Deleted temporary file: ${inputPath}`);
         });
 
         res.json({
@@ -72,6 +88,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
         if (req.file && fs.existsSync(req.file.path)) {
             fs.unlink(req.file.path, (err) => {
                 if (err) console.error("Error deleting temporary file during error handling:", err);
+                else console.log(`Deleted temporary file during error handling: ${req.file.path}`);
             });
         }
 
