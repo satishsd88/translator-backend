@@ -5,7 +5,7 @@ module.exports = {
   process: async (text, targetLanguage) => {
     try {
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      
+
       const response = await openai.chat.completions.create({
         model: "gpt-4o", // Using gpt-4o for potentially better performance/cost for translation
         messages: [{
@@ -20,7 +20,7 @@ module.exports = {
       return response.choices[0]?.message?.content || text;
     } catch (error) {
       console.error('Translation error:', error.response ? error.response.data : error.message);
-      return text; 
+      return text;
     }
   }
 };
