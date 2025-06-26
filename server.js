@@ -1,111 +1,99 @@
-// server.js
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const cors = require('cors');
-require('dotenv').config(); // For loading .env file in local development (Render uses its own env vars)
-
-const openaiTranscriptionService = require('./openaiTranscriptionService');
-const translate = require('./translate');
+const { exec } = require('child_process');
+const { OpenAI } = require('openai');
 
 const app = express();
+const openai = new OpenAI(process.env.OPENAI_API_KEY);
+
+// Configure file upload
 const upload = multer({
-    dest: 'uploads/',
-    fileFilter: (req, file, cb) => {
-        // Updated allowedMimeTypes to primarily support audio/wav
-        const allowedMimeTypes = ['audio/wav', 'audio/webm', 'audio/mpeg', 'audio/mp4', 'audio/mpga', 'audio/m4a'];
-        if (allowedMimeTypes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error(`Invalid file type: ${file.mimetype}. Only ${allowedMimeTypes.join(', ')} are allowed.`), false);
-        }
+  dest: 'uploads/',
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'audio/webm') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only WebM audio files are allowed'), false);
     }
+  }
 });
 
-// Configure CORS for your Chrome Extension and Render backend
-// IMPORTANT: Replace 'YOUR_CHROME_EXTENSION_ID' with your actual extension ID.
-// To find it: Go to chrome://extensions, enable Developer mode, and copy the ID for your extension.
-app.use(cors({
-    origin: [
-        `chrome-extension://YOUR_CHROME_EXTENSION_ID`, // <--- *** REPLACE THIS PLACEHOLDER ***
-        'https://translator-backend-xob7.onrender.com' // Your Render backend URL
-    ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    credentials: true,
-    optionsSuccessStatus: 204
-}));
+// Create necessary directories
+['uploads', 'processed'].forEach(dir => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+});
 
-// Create 'uploads' directory if it doesn't exist
-if (!fs.existsSync('uploads')) {
-    fs.mkdirSync('uploads');
+// Convert to Whisper-supported format (MP3)
+async function convertAudio(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    exec(`ffmpeg -i ${inputPath} -codec:a libmp3lame -qscale:a 2 ${outputPath}`, 
+      (error, stdout, stderr) => {
+        if (error) {
+          console.error(`FFmpeg Error: ${stderr}`);
+          return reject(new Error('Audio conversion failed'));
+        }
+        resolve();
+      }
+    );
+  });
 }
 
-// Audio processing endpoint
+// Transcribe using OpenAI Whisper
+async function transcribeAudio(filePath) {
+  try {
+    const transcription = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(filePath),
+      model: "whisper-1",
+      response_format: "text"
+    });
+    return transcription;
+  } catch (error) {
+    console.error('OpenAI Transcription Error:', error);
+    throw new Error(`Failed to transcribe audio: ${error.message}`);
+  }
+}
+
+// API Endpoint
 app.post('/upload', upload.single('audio'), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No audio file provided.' });
-        }
-
-        const inputPath = req.file.path;
-        const targetLanguage = req.body.language || 'en';
-
-        // --- ADDED DIAGNOSTIC LOGGING ---
-        console.log(`Received file: ${req.file.originalname}`);
-        console.log(`Temporary file path on server: ${inputPath}`);
-        console.log(`Temporary file MIME type from Multer: ${req.file.mimetype}`);
-        try {
-            const stats = fs.statSync(inputPath);
-            console.log(`Temporary file size on server: ${stats.size} bytes`);
-            console.log(`Temporary file exists on server: ${fs.existsSync(inputPath)}`);
-        } catch (statError) {
-            console.error(`Error getting file stats on server: ${statError.message}`);
-        }
-        // --- END ADDED DIAGNOSTIC LOGGING ---
-
-
-        // Transcribe using the OpenAI Whisper API via openaiTranscriptionService
-        const transcription = await openaiTranscriptionService.transcribe(inputPath, targetLanguage);
-
-        // Translate the transcription using your translate module
-        const translation = await translate.process(transcription, targetLanguage);
-
-        // Clean up the temporary audio file after processing
-        fs.unlink(inputPath, (err) => {
-            if (err) console.error("Error deleting input file:", err);
-            else console.log(`Deleted temporary file: ${inputPath}`);
-        });
-
-        res.json({
-            text: transcription,
-            translation: translation
-        });
-
-    } catch (error) {
-        console.error('Processing error:', error);
-
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlink(req.file.path, (err) => {
-                if (err) console.error("Error deleting temporary file during error handling:", err);
-                else console.log(`Deleted temporary file during error handling: ${req.file.path}`);
-            });
-        }
-
-        res.status(500).json({
-            error: error.message || 'An unknown error occurred during processing.',
-            details: error.stack
-        });
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
     }
+
+    const inputPath = req.file.path;
+    const outputPath = path.join('processed', `${req.file.filename}.mp3`);
+
+    // Step 1: Convert to supported format
+    await convertAudio(inputPath, outputPath);
+
+    // Step 2: Transcribe with Whisper
+    const transcription = await transcribeAudio(outputPath);
+
+    // Step 3: Cleanup files
+    fs.unlinkSync(inputPath);
+    fs.unlinkSync(outputPath);
+
+    res.json({ text: transcription });
+
+  } catch (error) {
+    console.error('Processing error:', error);
+    
+    // Cleanup files if they exist
+    if (req.file?.path) fs.unlinkSync(req.file.path);
+    const outputPath = path.join('processed', `${req.file?.filename}.mp3`);
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    
+    res.status(500).json({ 
+      error: error.message,
+      details: error.stack 
+    });
+  }
 });
 
-// Basic health check endpoint for Render
-app.get('/', (req, res) => {
-    res.send('Translator backend is running and ready for audio uploads!');
-});
-
-// Start server on the port Render assigns, or default to 10000
-const PORT = process.env.PORT || 10000;
+// Start server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
