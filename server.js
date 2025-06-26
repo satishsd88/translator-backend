@@ -1,92 +1,94 @@
+// server.js
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
-const whisper = require('./whisper'); // Your whisper processing module
-const translate = require('./translate'); // Your translation module
+const cors = require('cors');
+require('dotenv').config(); // For loading .env file in local development (Render uses its own env vars)
+
+const openaiTranscriptionService = require('./openaiTranscriptionService');
+const translate = require('./translate');
 
 const app = express();
-const upload = multer({ 
-  dest: 'uploads/',
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'audio/webm' || file.mimetype === 'audio/wav') {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type'), false);
+const upload = multer({
+    dest: 'uploads/',
+    fileFilter: (req, file, cb) => {
+        const allowedMimeTypes = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/mpga', 'audio/m4a'];
+        if (allowedMimeTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error(`Invalid file type: ${file.mimetype}. Only ${allowedMimeTypes.join(', ')} are allowed.`), false);
+        }
     }
-  }
 });
 
-// Create necessary directories
-['uploads', 'processed'].forEach(dir => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-});
+// Configure CORS for your Chrome Extension and Render backend
+// IMPORTANT: Replace 'YOUR_CHROME_EXTENSION_ID' with your actual extension ID.
+// To find it: Go to chrome://extensions, enable Developer mode, and copy the ID for your extension.
+app.use(cors({
+    origin: [
+        `chrome-extension://YOUR_CHROME_EXTENSION_ID`, // <--- *** REPLACE THIS PLACEHOLDER ***
+        'https://translator-backend-xob7.onrender.com' // Your Render backend URL
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true,
+    optionsSuccessStatus: 204
+}));
+
+// Create 'uploads' directory if it doesn't exist
+if (!fs.existsSync('uploads')) {
+    fs.mkdirSync('uploads');
+}
 
 // Audio processing endpoint
 app.post('/upload', upload.single('audio'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No audio file provided' });
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No audio file provided.' });
+        }
+
+        const inputPath = req.file.path;
+        const targetLanguage = req.body.language || 'en';
+
+        // Transcribe using the OpenAI Whisper API via openaiTranscriptionService
+        const transcription = await openaiTranscriptionService.transcribe(inputPath, targetLanguage);
+
+        // Translate the transcription using your translate module
+        const translation = await translate.process(transcription, targetLanguage);
+
+        // Clean up the temporary audio file after processing
+        fs.unlink(inputPath, (err) => {
+            if (err) console.error("Error deleting input file:", err);
+        });
+
+        res.json({
+            text: transcription,
+            translation: translation
+        });
+
+    } catch (error) {
+        console.error('Processing error:', error);
+
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlink(req.file.path, (err) => {
+                if (err) console.error("Error deleting temporary file during error handling:", err);
+            });
+        }
+
+        res.status(500).json({
+            error: error.message || 'An unknown error occurred during processing.',
+            details: error.stack
+        });
     }
-
-    const inputPath = req.file.path;
-    const outputPath = path.join('processed', `${req.file.filename}.wav`);
-
-    // Convert to WAV format for Whisper
-    await convertToWav(inputPath, outputPath);
-
-    // Transcribe with Whisper
-    const transcription = await whisper.transcribe(outputPath);
-    
-    // Translate if needed
-    const translation = await translate.process(
-      transcription, 
-      req.body.language || 'en'
-    );
-
-    // Cleanup files
-    fs.unlinkSync(inputPath);
-    fs.unlinkSync(outputPath);
-
-    res.json({ 
-      text: transcription,
-      translation: translation 
-    });
-
-  } catch (error) {
-    console.error('Processing error:', error);
-    
-    // Cleanup files if they exist
-    if (req.file?.path) fs.unlinkSync(req.file.path);
-    const outputPath = path.join('processed', `${req.file?.filename}.wav`);
-    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-    
-    res.status(500).json({ 
-      error: error.message,
-      details: error.stack 
-    });
-  }
 });
 
-// Audio conversion helper
-function convertToWav(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    exec(`ffmpeg -i ${inputPath} -ar 16000 -ac 1 -c:a pcm_s16le ${outputPath}`, 
-      (error, stdout, stderr) => {
-        if (error) {
-          console.error(`FFmpeg Error: ${stderr}`);
-          return reject(new Error('Audio conversion failed'));
-        }
-        resolve();
-      }
-    );
-  });
-}
+// Basic health check endpoint for Render
+app.get('/', (req, res) => {
+    res.send('Translator backend is running and ready for audio uploads!');
+});
 
-// Start server
-const PORT = process.env.PORT || 3000;
+// Start server on the port Render assigns, or default to 10000
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('FFmpeg available:', !!exec('ffmpeg -version'));
+    console.log(`Server running on port ${PORT}`);
 });
